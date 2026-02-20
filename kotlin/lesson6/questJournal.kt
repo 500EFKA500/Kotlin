@@ -14,8 +14,6 @@ import de.fabmax.kool.util.Time         // Время deltaT - сколько п
 import de.fabmax.kool.pipeline.ClearColorLoad // Режим говорящий не очищать экран от элементов (нужен для UI)
 
 import de.fabmax.kool.modules.ui2.*     // импорт всех компонентов интерфейса, вроде text, button, Row....
-import lesson5.QuestState
-
 import java.io.File
 
 // startWith('quest:') - проверка с чего начинается строка
@@ -88,7 +86,7 @@ data class PLayerProgressSaved(
 
 typealias Listener = (GameEvent) -> Unit
 
-class EvenBus{
+class EventBus{
     private val listeners = mutableListOf<Listener>()
 
     fun subscribe(listener: Listener){
@@ -387,7 +385,7 @@ class GuardQuest: QuestDefinition{
 }
 
 class QuestManager(
-    private val bus: EvenBus,
+    private val bus: EventBus,
     private val game: GameState,
     private val quests: List<QuestDefinition>
 ){
@@ -408,8 +406,10 @@ class QuestManager(
         for (quest in quests){
             val current = getStateName(player, quest.questId)
             val nextState = quest.nextStateName(current, event, game)
+
             if (nextState == current) continue
             setStateName(player, quest.questId, current)
+
             bus.publish(QuestStateChanged(player, quest.questId, nextState))
             bus.publish(PLayerProgressSaved(player, "автосохранение"))
         }
@@ -436,5 +436,90 @@ class QuestManager(
 
         outerCopy[playerId] = innerCopy.toMap()
         stateByPlayer.value = outerCopy.toMap()
+    }
+}
+
+class SaveSystem(
+    private val bus: EventBus,
+    private val game: GameState,
+    private val questManager: QuestManager,
+    private val quests: List<QuestDefinition>,
+) {
+    init {
+        bus.subscribe { event ->
+            if (event is PLayerProgressSaved) {
+                saveAllForPlayer(event.playerId)
+            }
+        }
+    }
+
+    private fun saveFile(playerId: String): File{
+        val dir = File("saves")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "${playerId}.save")
+    }
+
+    private fun saveAllForPlayer(playerId: String) {
+        val f = saveFile(playerId)
+
+        val sb = StringBuilder()
+        // Легкое создание и изменение изменяемых последовательных символов
+        // В отличии от String - StringBuilder дает возможномть, добовлять, вставлять и изменять сиволы -
+        // Без создание обьктов
+
+        sb.append("playerId=").append(playerId).append("\n")
+        sb.append("hp=").append(game.hp.value).append("\n")
+        sb.append("gold=").append(game.gold.value).append("\n")
+
+        for (q in quests){
+            val stateName = questManager.getStateName(playerId, q.questId)
+            sb.append("quest: ").append(q.questId).append("=").append(stateName).append("\n")
+            // quests: - префикс для отличия строк с квестами от свойств
+        }
+        f.writeText(sb.toString())
+    }
+    // Почему используем StringGuilder
+    // Когда мы использует обычные строки val text =
+
+    // каждый + создает новую строку (обькт)
+    // И если строк много (а их будет много, из-за больших сохранений, файлов логов, файлов настроект)
+    // То генерируется лишнее врменнные строки, появляется лишняя нагрузка на память, тяжелая читаемость когда строка
+
+    // Что в данной стории делает StringBuilder (он как коробка, в которую постепенно дописывается текст)
+    // append - добовляет не новую строку(как в списке), а новый кусок текста внутрь общей коробки строк
+    // В конце "билда" делаем toString - преобразет в итоговую ОДНУ финальную строрку
+
+    fun loadAllForPlayer(playerId: String){
+        val f = saveFile(playerId)
+        if (!f.exists()) return
+        // Прервать, если файла сохранения нет
+
+        val map = mutableMapOf<String, String>()
+
+        for (line in f.readLines()){
+            val part = line.split("=")
+            if(part.size == 2){
+                map[part[0]] = part[1]
+            }
+        }
+        val loadedHp = map["hp"]?.toIntOrNull() ?: 100
+        val loadedGold = map["gold"]?.toIntOrNull() ?: 0
+
+        game.hp.value = loadedHp
+        game.gold.value = loadedGold
+
+        // Загрузка квестов
+        for ((key, value ) in map){
+            if (key.startsWith("quest:")){
+                // StartWith - проверка, на то, с чего начинается кусок строки
+
+                val questId = key.substringAfter("quest:")
+                // substringAfter - берет чать строки, после quest:
+                // Пример ключ "quest:q_guard" -> substringAfter вернут только q_guard
+
+                questManager.setStateName(playerId, questId, value)
+                // Подргужаем этап квеста, на котором остоновился игрок во время сохранения
+            }
+        }
     }
 }
