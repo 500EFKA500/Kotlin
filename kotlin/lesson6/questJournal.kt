@@ -523,3 +523,20 @@ class SaveSystem(
         }
     }
 }
+
+fun main() = KoolApplication {
+    val game = GameState()
+    val bus = EventBus()
+
+    val alchemistQuest = AlchemistQuest()
+    val guardQuest = GuardQuest()
+
+    val questList = listOf<QuestDefinition>(alchemistQuest, guardQuest)
+    // Создаем список квестов и кладем туда наши квесты
+
+    val questManager = QuestManager(bus, game, questList)
+    val saves = SaveSystem(bus, game, questManager, questList)
+
+    val activeNpcId = mutableStateOf<String?>(null)
+    // если у npc null значит игрок ещё не открыл диалог с ним
+}
