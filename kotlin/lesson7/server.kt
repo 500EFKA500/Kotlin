@@ -548,13 +548,13 @@ fun main() = KoolApplication {
 
                     Button("Загрузить сохранение"){
                         modifier.margin(end=8.dp).onClick {
-                            server.sendCommand(CmdLoadPlayer(ui.playerId.value), ui.networkLagMs.value)
+                            client.send(CmdLoadPlayer(ui.playerId.value))
                         }
                     }
 
                     Button("Сохраниться"){
                         modifier.margin(end=8.dp).onClick {
-                            server.sendCommand(CmdSavePlayer(ui.playerId.value), ui.networkLagMs.value)
+                            client.send(CmdSavePlayer(ui.playerId.value))
                         }
                     }
                 }
