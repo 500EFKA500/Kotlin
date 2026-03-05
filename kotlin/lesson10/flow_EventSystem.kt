@@ -422,6 +422,39 @@ fun main() = KoolApplication {
                 .margin(16.dp)
                 .background(RoundRectBackground(Color(0f, 0f, 0f, 0.6f), 14.dp))
                 .padding(12.dp)
+
+            Text("Player: ${hud.activePlayerId.use()}"){}
+            Text("Player: ${hud.activePlayerId.use()}"){modifier.margin(bottom = sizes.gap)}
+
+            Text("QuestState: ${hud.questState.use()}"){}
+            Text("Poison ticks left: ${hud.poisonTicksLeft.use()}"){}
+
+            Text("Attack cooldown: ${hud.attackCooldownMsLeft.use()} ms"){modifier.margin(bottom = sizes.gap)}
+
+            Row {
+                Button("Switch Player"){
+                    modifier.margin(bottom = sizes.gap)
+                    modifier.onClick {
+                        hud.activePlayerId.value =
+                            if (hud.activePlayerId.value == "Stas") "Oleg" else "Stas"
+                    }
+                }
+                Button("Save JSON"){
+                    modifier.margin(bottom = sizes.gap)
+                    modifier.onClick {
+                        if (Shared.server == null) return@onClick
+                        val saves = SaveSystem()
+                        val server = GameServer()
+                        coroutineScope.launch {
+                            server.players.collect { playersMap ->
+                                val pid = hud.activePlayerId.value
+                                val player = playersMap[pid] ?: return@collect
+                                saves.save(player)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
