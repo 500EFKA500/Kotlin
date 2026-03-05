@@ -1,2 +1,0 @@
-package lesson7
-
