@@ -234,17 +234,21 @@ class BuffSystem(
         if (e is AttackBuffApplied){
             buffJob[e.playerId]?.cancel()
 
+
+            server.updatePlayer(e.playerId) {player ->
+                player.copy(attackCooldownMsLeft = player.attackCooldownMsLeft - e.amount)
+            }
             val job = scope.launch {
                 var tick: Int = 0
-                server.updatePlayer(e.playerId) {player ->
-                    player.copy(attackCooldownMsLeft = player.attackCooldownMsLeft + e.amount)
-                }
                 while (isActive && e.ticks <= tick){
                     tick += 1
                     delay(e.intervalMs)
                 }
             }
             buffJob[e.playerId] = job
+            server.updatePlayer(e.playerId) {player ->
+                player.copy(attackCooldownMsLeft = player.attackCooldownMsLeft + e.amount)
+            }
         }
     }
 }
@@ -341,6 +345,7 @@ object Shared{
     var cooldowns: CooldownSystem? = null
     var quests: QuestSystem? = null
     var poison: PoisonSystem? = null
+    var buff: BuffSystem? = null
     var damage: DamageSystem? = null
 }
 
@@ -375,6 +380,7 @@ fun main() = KoolApplication {
         val damage = DamageSystem(server)
         val cooldowns = CooldownSystem(server, coroutineScope)
         val poison = PoisonSystem(server, coroutineScope)
+        val buff = BuffSystem(server, coroutineScope)
         val quests = QuestSystem(server, coroutineScope)
 
         Shared.server = server
@@ -382,6 +388,7 @@ fun main() = KoolApplication {
         Shared.damage = damage
         Shared.cooldowns = cooldowns
         Shared.poison = poison
+        Shared.buff = buff
         Shared.quests = quests
 
         coroutineScope.launch {
@@ -515,7 +522,9 @@ fun main() = KoolApplication {
                 Button("Получить баф скорости аттаки"){
                     modifier.margin(bottom = sizes.gap)
                     modifier.onClick {
-
+                        val server = GameServer()
+                        val buff = BuffSystem(server, coroutineScope)
+                        buff.onEvent(AttackBuffApplied(hud.activePlayerId.value, 5, 500, 1000L))
                     }
                 }
             }
