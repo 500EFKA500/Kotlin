@@ -44,6 +44,7 @@ data class PlayerSave(
     val playerId: String,
     val hp: Int,
     val gold: Int,
+    val damage: Int,
     val poisonTicksLeft: Int,
     val attackCooldownMsLeft: Long,
     val questState: String
@@ -94,6 +95,18 @@ data class SaveRequested(
     override val playerId: String
 ): GameEvent
 
+data class CommandRejected(
+    override val playerId: String,
+    val reason: String
+): GameEvent
+
+data class AttackBuffApplied(
+    override val playerId: String,
+    val ticks: Int,
+    val amount: Int,
+    val intervalMs: Long
+): GameEvent
+
 class GameServer{
     private val _events = MutableSharedFlow<GameEvent>(extraBufferCapacity = 64)
     // Дополнительный небольшой буфер, что Emit при рассылке событий чаще проходил не упираясь в ограничение буфера
@@ -102,8 +115,8 @@ class GameServer{
 
     private val _players = MutableStateFlow(
         mapOf(
-            "Oleg" to PlayerSave("Oleg", 100, 0, 0, 0L, "START"),
-            "Stas" to PlayerSave("Stas", 100, 0, 0, 0L, "START")
+            "Oleg" to PlayerSave("Oleg", 100, 0, 20, 0, 1200L, "START"),
+            "Stas" to PlayerSave("Stas", 100, 0, 20, 0, 1200L, "START")
         )
     )
 
@@ -132,7 +145,7 @@ class GameServer{
     }
 
     fun getPlayer(playerId: String): PlayerSave{
-        return _players.value[playerId] ?: PlayerSave(playerId, 100, 0, 0, 0L, "START")
+        return _players.value[playerId] ?: PlayerSave(playerId, 100, 0, 20, 0, 1200L, "START")
     }
 }
 
@@ -211,6 +224,30 @@ class PoisonSystem(
         }
     }
 }
+class BuffSystem(
+    private val server: GameServer,
+    private val scope: kotlinx.coroutines.CoroutineScope
+){
+    private val buffJob = mutableMapOf<String, Job>()
+
+    fun onEvent(e: GameEvent){
+        if (e is AttackBuffApplied){
+            buffJob[e.playerId]?.cancel()
+
+            val job = scope.launch {
+                var tick: Int = 0
+                server.updatePlayer(e.playerId) {player ->
+                    player.copy(attackCooldownMsLeft = player.attackCooldownMsLeft + e.amount)
+                }
+                while (isActive && e.ticks <= tick){
+                    tick += 1
+                    delay(e.intervalMs)
+                }
+            }
+            buffJob[e.playerId] = job
+        }
+    }
+}
 
 class QuestSystem(
     private val server: GameServer,
@@ -234,6 +271,7 @@ class QuestSystem(
             }
             is ChoiceSelected -> {
                 if (e.npcId != npcId) return
+                if (e.choiceId == "help") publish(CommandRejected(e.playerId, "Сервер отказал"))
 
                 if (player.questState == "OFFERED"){
                     val newState =
@@ -285,9 +323,10 @@ class HudState{
 
     val hp = mutableStateOf(100)
     val gold = mutableStateOf(0)
+    val damage = mutableStateOf(20)
     val poisonTicksLeft = mutableStateOf(0)
     val questState = mutableStateOf("START")
-    val attackCooldownMsLeft = mutableStateOf(0L)
+    val attackCooldownMsLeft = mutableStateOf(1200L)
 
     val log =mutableStateOf<List<String>>(emptyList())
 }
@@ -454,7 +493,38 @@ fun main() = KoolApplication {
                         }
                     }
                 }
+                Button("Атаковать игрока"){
+                    modifier.margin(bottom = sizes.gap)
+                    modifier.onClick {
+                        val target = if (hud.activePlayerId.value == "Stas") "Oleg" else "Stas"
+                        val server = GameServer()
+                        val cooldowns = CooldownSystem(server, coroutineScope)
+                        if (!cooldowns.canAttack(hud.activePlayerId.value)) return@onClick
+                        suspend {
+                            coroutineScope.launch {
+                                server.players.collect { playersMap ->
+                                    val pid = hud.activePlayerId.value
+                                    val player = playersMap[pid] ?: return@collect
+                                    server.publish(DamageDealt(hud.activePlayerId.value, target, player.damage))
+                                    cooldowns.startCooldown(hud.activePlayerId.value, player.attackCooldownMsLeft)
+                                }
+                            }
+                        }
+                    }
+                }
+                Button("Получить баф скорости аттаки"){
+                    modifier.margin(bottom = sizes.gap)
+                    modifier.onClick {
+
+                    }
+                }
             }
         }
     }
 }
+
+// 1 - e) EncoreCraft
+// 2 - удаляет в списке старые значение через написанное количество, то есть список не может быть больше вписанного
+// 3 - функция запускается на фоне всех остольных действий (как корутина) как "async def: (python)" или "task.delay(function()) (lua)"
+// 4 -  ->  ()  <-       +++@)_$!$*_!($^!&$^))))))))!$)))@!%&*@!$@!+@!+%(@!%U(
+
