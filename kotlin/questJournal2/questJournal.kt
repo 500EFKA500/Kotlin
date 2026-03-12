@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.update
 
 // импорты Serialization
 import kotlinx.serialization.Serializable           // аннотация, что можно сохранять
@@ -85,6 +86,11 @@ data class QuestPinned(
     val questId: String
 ): GameEvent
 
+data class AddQuest(
+    override val playerId: String,
+    val questId: String
+): GameEvent
+
 data class QuestProgressed(
     override val playerId: String,
     val questId: String
@@ -108,6 +114,11 @@ data class CmdPinQuest(
 ): GameCommand
 
 data class CmdProgressedQuest(
+    override val playerId: String,
+    val questId: String
+): GameCommand
+
+data class CmdAddQuest (
     override val playerId: String,
     val questId: String
 ): GameCommand
@@ -210,6 +221,7 @@ class GameServer{
             "Oleg" to listOf(
                 QuestStateOnServer("q_alchemist", "Алхимик и трава", 0, QuestStatus.ACTIVE, true, false),
                 QuestStateOnServer("q_guard", "Тебе сюда нельзя", 0, QuestStatus.ACTIVE, true, false)
+                // Как сюда что то добавить?
             ),
             "Stas" to listOf(
                 QuestStateOnServer("q_alchemist", "Алхимик и трава", 0, QuestStatus.ACTIVE, true, false),
@@ -228,11 +240,21 @@ class GameServer{
         }
     }
 
+    private suspend fun cmdAddQuest(playerId: String, questId: String){
+        _questByPlayer.update { currentMap ->
+            currentMap.toMutableMap().apply {
+                val currentQuests = get(playerId) ?: emptyList()
+                put(playerId, currentQuests + QuestStateOnServer(questId, "Алхимик и трава", 0, QuestStatus.ACTIVE, true, false))
+            }
+        }
+    }
+
     private suspend fun process(cmd: GameCommand){
         when (cmd){
             is CmdOpenQuest -> openQuest(cmd.playerId, cmd.questId)
             is CmdPinQuest -> pinQuest(cmd.playerId, cmd.questId)
             is CmdProgressedQuest -> progressQuest(cmd.playerId, cmd.questId)
+            is CmdAddQuest -> cmdAddQuest(cmd.playerId, cmd.questId)
             is CmdSwitchPlayer -> {}
         }
     }
@@ -446,11 +468,27 @@ fun main() = KoolApplication {
                                 }
                             }
                         }
+                        Row {
+                            Button("Добавить квест"){
+                                modifier.margin(end = 8.dp).onClick{
+                                    server.trySend(CmdAddQuest(hud.activePlayerIdUi.value, q.questId))
+                                }
+                            }
+                        }
                     }
                 }
                 Text("Log:") {modifier.margin(top = sizes.gap)}
                 for (line in hud.log.use()) {
                     Text(line){modifier.font(sizes.smallText)}
+                }
+            }
+            Column {
+                Text("pinned:") {modifier.margin(top = sizes.gap)}
+                val entries = hud.questEntries.use().sortedWith(compareBy(
+                    {it.marker}
+                ))
+                for (line in entries) {
+                    Text(markerSymbol(line.marker)){modifier.font(sizes.smallText)}
                 }
             }
         }
