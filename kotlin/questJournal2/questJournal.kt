@@ -108,6 +108,11 @@ data class CmdOpenQuest(
     val questId: String
 ): GameCommand
 
+data class CmdGiveGold(
+    override val playerId: String,
+    val value: Int
+): GameCommand
+
 data class CmdPinQuest(
     override val playerId: String,
     val questId: String
@@ -230,6 +235,8 @@ class GameServer{
         )
     )
 
+    private val _goldByPlayer = MutableStateFlow<>()
+
     val questByPlayer: StateFlow<Map<String, List<QuestStateOnServer>>> = _questByPlayer.asStateFlow()
 
     fun start(scope: kotlinx.coroutines.CoroutineScope){
@@ -240,7 +247,7 @@ class GameServer{
         }
     }
 
-    private suspend fun cmdAddQuest(playerId: String, questId: String){
+    private fun cmdAddQuest(playerId: String, questId: String){
         _questByPlayer.update { currentMap ->
             currentMap.toMutableMap().apply {
                 val currentQuests = get(playerId) ?: emptyList()
@@ -256,7 +263,11 @@ class GameServer{
             is CmdProgressedQuest -> progressQuest(cmd.playerId, cmd.questId)
             is CmdAddQuest -> cmdAddQuest(cmd.playerId, cmd.questId)
             is CmdSwitchPlayer -> {}
+            else -> {}
         }
+    }
+    private fun cmdGiveGold(playerId: String, value: Int){
+
     }
 
     private fun getPlayerQuests(playerId: String): List<QuestStateOnServer>{
@@ -327,6 +338,7 @@ class GameServer{
 class HudState{
     val activePlayerIdFlow = MutableStateFlow("Oleg")
     val activePlayerIdUi = mutableStateOf("Oleg")
+    val playerGold = mutableStateOf(100)
 
     val questEntries = mutableStateOf<List<QuestJournalEntry>>(emptyList())
     val selectedQuestId = mutableStateOf<String?>(null)
