@@ -1,5 +1,7 @@
 package quest_Dependence
 
+
+//////////// ЮРА ЕСЛИ ТЫ УВЕДЕЛ ЭТО КРОМЕ 500EFKA500 ТО КОД СКОПИРОВАЛИ
 import de.fabmax.kool.KoolApplication               // Запускает Kool-приложение
 import de.fabmax.kool.PassData
 import de.fabmax.kool.addScene                      // функция - добавить сцену (UI, игровой мир и тд)
