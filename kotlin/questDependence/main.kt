@@ -1,7 +1,7 @@
 package quest_Dependence
 
 
-//////////// ЮРА ЕСЛИ ТЫ УВЕДЕЛ ЭТО КРОМЕ 500EFKA500 ТО КОД СКОПИРОВАЛИ
+
 import de.fabmax.kool.KoolApplication               // Запускает Kool-приложение
 import de.fabmax.kool.PassData
 import de.fabmax.kool.addScene                      // функция - добавить сцену (UI, игровой мир и тд)
@@ -33,8 +33,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.launchIn
+//////////// ЮРА ЕСЛИ ТЫ УВЕДЕЛ ЭТО КРОМЕ 500EFKA500 ТО КОД СКОПИРОВАЛИ
 import kotlinx.coroutines.flow.flatMapLatest
-import lesson11.HudState
 
 // ---------- Зависимости и блокировка квестов ----------- //
 
