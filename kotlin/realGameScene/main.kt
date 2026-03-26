@@ -49,7 +49,8 @@ enum class QuestState{
 // типы объектов
 enum class WorldObjectType{
     ALCHEMIST,
-    HERB_SOURCE
+    HERB_SOURCE,
+    CHEST
 }
 
 // описание объектов в игровом мире
@@ -64,7 +65,8 @@ data class WorldObjectDef(
 data class NpcMemory(
     val hasMet: Boolean,
     val timesTalked: Int,
-    val receivedHerb: Boolean
+    val receivedHerb: Boolean,
+    val sawPlayerNearSource: Boolean
 )
 
 data class PlayerState(
@@ -102,6 +104,7 @@ fun initialPlayerState(playerId: String): PlayerState{
             NpcMemory(
                 true,
                 2,
+                false,
                 false
             ),
             null,
@@ -118,6 +121,7 @@ fun initialPlayerState(playerId: String): PlayerState{
             NpcMemory(
                 false,
                 0,
+                false,
                 false
             ),
             null,
@@ -260,6 +264,7 @@ data class InventoryChanged(
     val itemId: String,
     val newCount: Int
 ): GameEvent
+
 data class QuestStateChanged(
     override val playerId: String,
     val newState: QuestState
@@ -290,6 +295,13 @@ class GameServer {
             3f,
             0f,
             1.7f
+        ),
+        WorldObjectDef(
+            "treasure_box",
+            WorldObjectType.CHEST,
+            5f,
+            0f,
+            2f
         )
     )
 
@@ -364,6 +376,7 @@ class GameServer {
                 when (newAreaId){
                     "alchemist" -> "Подойди и нажми на алхимика"
                     "herb_source" -> "собери траву"
+                    "treasure_box" -> "открыть сундук"
                     else -> "Подойди к одной из локаций"
                 }
         }
@@ -413,6 +426,9 @@ class GameServer {
 
                 when (obj.type){
                     WorldObjectType.ALCHEMIST -> {
+                        if (player.alchemistMemory.sawPlayerNearSource == true){
+                            _events.emit(ServerMessage(cmd.playerId, "Вижу, ты хотя бы дошёл до места, где растёт трава, ты ее принёс?"))
+                        }
                         val oldMemory = player.alchemistMemory
                         val newMemory = oldMemory.copy(
                             hasMet = true,
@@ -433,6 +449,14 @@ class GameServer {
                             return
                         }
 
+                        val oldMemory = player.alchemistMemory
+                        val newMemory = oldMemory.copy(
+                            sawPlayerNearSource = true
+                        )
+                        updatePlayer(cmd.playerId) { p ->
+                            p.copy(alchemistMemory = newMemory)
+                        }
+
                         val oldCount = herbCount(player)
                         val newCount = oldCount + 1
                         val newInventory = player.inventory + ("herb" to newCount)
@@ -444,14 +468,30 @@ class GameServer {
                         _events.emit(InteractedWithHerbSource(cmd.playerId, obj.id))
                         _events.emit(InventoryChanged(cmd.playerId, "herb", newCount))
                     }
+
+                    WorldObjectType.CHEST -> {
+                        val newGold = player.gold + 1
+
+                        updatePlayer(cmd.playerId){p ->
+                            p.copy(gold = newGold)
+                        }
+                    }
                 }
             }
 
             is CmdChooseDialogueOption -> {
                 val player = getPlayerData(cmd.playerId)
+                val distance = distance2D(player.posX, player.posZ, 5f, 0f)
+                // 5f 0f это позиция алхимика
+
 
                 if (player.currentAreaId != "alchemist"){
                     _events.emit(ServerMessage(cmd.playerId, "Сначала подойди к алхимику"))
+                    return
+                }
+
+                if (distance >= 2f){
+                    _events.emit(ServerMessage(cmd.playerId, "Ты отошел слишком далеко от Алхимика"))
                     return
                 }
 
@@ -561,6 +601,7 @@ fun currentZoneText(player: PlayerState): String{
     return when(player.currentAreaId){
         "alchemist" -> "Зона: Алхимик"
         "herb_source" -> "Зона источника травы"
+        "treasure_box" -> "Зона сундука"
         else -> "Без зоны :("
     }
 }
@@ -749,6 +790,44 @@ fun main() = KoolApplication {
                             server.trySend(CmdMovePlayer(player.playerId, dx = 0f, dz = 0.5f))
                         }
                     }
+                }
+                Text("Взаимодействия:"){ modifier.margin(top = sizes.gap) }
+
+                Row {
+                    Button("Потрогать ближайшего"){
+                        modifier.margin(end = 8.dp).onClick{
+                            server.trySend(CmdInteract(player.playerId))
+                        }
+                    }
+                }
+
+                Text(dialogue.npcId){ modifier.margin(top = sizes.gap) }
+                Text(dialogue.text){ modifier.margin(bottom = sizes.smallGap) }
+
+                if(dialogue.option.isEmpty()){
+                    Text("Нет доступных варинатов ответа"){
+                        modifier.font(sizes.smallText).margin(bottom = sizes.gap)
+                    }
+                }else{
+                    Row{
+                        for (option in dialogue.option){
+                            Button(option.text){
+                                modifier.margin(end = 8.dp).onClick{
+                                    server.trySend(
+                                        CmdChooseDialogueOption(
+                                            player.playerId,
+                                            option.id
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Text("Лог: "){modifier.margin(top = sizes.gap)}
+
+                for(line in hud.log.use()){
+                    Text(line){ modifier.font(sizes.smallText) }
                 }
             }
         }
