@@ -11,6 +11,7 @@ import de.fabmax.kool.util.Color                // Color - цвет (RGBA)
 import de.fabmax.kool.util.Time                 // Time.deltaT - сколько секунд прошло между кадрами
 import de.fabmax.kool.pipeline.ClearColorLoad   // ClearColorLoad - режим: "не очищай экран, оставь то что уже нарисовано"
 import de.fabmax.kool.modules.ui2.*             // UI2: addPanelSurface, Column, Row, Button, Text, dp, remember, mutableStateOf
+import de.fabmax.kool.scene.geometry.IndexedVertexList
 import jdk.jfr.DataAmount
 import jdk.jfr.StackTrace
 
@@ -73,7 +74,8 @@ data class PlayerState(
     val inventory: Map<String, Int>,
     val alchemistMemory: NpcMemory,
     val currentAreaId: String?,
-    val hintText: String
+    val hintText: String,
+    val gold: Int
 )
 
 fun herbCount(player: PlayerState): Int{
@@ -102,7 +104,8 @@ fun initialPlayerState(playerId: String): PlayerState{
                 false
             ),
             null,
-            "Подойди к одной из локаций"
+            "Подойди к одной из локаций",
+            0
         )
     }else{
         PlayerState(
@@ -117,7 +120,8 @@ fun initialPlayerState(playerId: String): PlayerState{
                 false
             ),
             null,
-            "Подойди к одной из локаций"
+            "Подойди к одной из локаций",
+            0
         )
     }
 }
@@ -214,7 +218,7 @@ data class CmdInteract(
 
 data class CmdChooseDialogueOption(
     override val playerId: String,
-    val newPlayerId: String
+    val optionId: String
 ): GameCommand
 
 data class CmdResetPlayer(
@@ -415,6 +419,81 @@ class GameServer {
 
                         _events.emit(InteractedWithNpc(cmd.playerId, obj.id))
                         _events.emit(NpcMemoryChanged(cmd.playerId, newMemory))
+                    }
+
+                    WorldObjectType.HERB_SOURCE -> {
+                        if (player.questState != QuestState.WAIT_HERB){
+                            _events.emit(ServerMessage(cmd.playerId, "Трава сейчас тебе не нужна - сначала возьми квест"))
+                            return
+                        }
+
+                        val oldCount = herbCount(player)
+                        val newCount = oldCount + 1
+                        val newInventory = player.inventory + ("herb" to newCount)
+
+                        updatePlayer(cmd.playerId){p ->
+                            p.copy(inventory = newInventory)
+                        }
+
+                        _events.emit(InteractedWithHerbSource(cmd.playerId, obj.id))
+                        _events.emit(InventoryChanged(cmd.playerId, "herb", newCount))
+                    }
+                }
+            }
+
+            is CmdChooseDialogueOption -> {
+                val player = getPlayerData(cmd.playerId)
+
+                if (player.currentAreaId != "alchemist"){
+                    _events.emit(ServerMessage(cmd.playerId, "Сначала подойди к алхимику"))
+                    return
+                }
+
+                when(cmd.optionId){
+                    "accept_help" -> {
+                        if (player.questState != QuestState.START){
+                            _events.emit(ServerMessage(cmd.playerId, "Путь помощи можно выбрать только в "))
+                            return
+                        }
+
+                        updatePlayer(cmd.playerId) { p ->
+                            p.copy(questState = QuestState.WAIT_HERB)
+                        }
+                        _events.emit(QuestStateChanged(cmd.playerId, QuestState.WAIT_HERB))
+                        _events.emit(ServerMessage(cmd.playerId, "Алхимик попросить собрать 3 травы"))
+                    }
+                    "give_herb" -> {
+                        if (player.questState != QuestState.WAIT_HERB) {
+                            _events.emit(ServerMessage(cmd.playerId, "Сейчас нельзя сдать траву"))
+                        }
+
+                        val herbs = herbCount(player)
+
+                        if (herbs < 3){
+                            _events.emit(ServerMessage(cmd.playerId, "Недостаточно травы"))
+                            return
+                        }
+
+                        val newCount = herbs - 3
+                        val newInventory = if(newCount <= 0) player.inventory - "herb" else player.inventory + ("herb" to newCount)
+
+                        val newMemory = player.alchemistMemory.copy(
+                            receivedHerb = true
+                        )
+
+                        updatePlayer(cmd.playerId){p ->
+                            p.copy(
+                                inventory = newInventory,
+                                gold = p.gold + 5,
+                                questState = QuestState.GOOD_END,
+                                alchemistMemory = newMemory
+                            )
+                        }
+
+                        _events.emit(InventoryChanged(cmd.playerId, "herb", newCount))
+                        _events.emit(NpcMemoryChanged(cmd.playerId, newMemory))
+                        _events.emit(QuestStateChanged(cmd.playerId, QuestState.GOOD_END))
+                        _events.emit(ServerMessage(cmd.playerId, "Алхимик получил траву и выдал золото"))
                     }
                 }
             }
