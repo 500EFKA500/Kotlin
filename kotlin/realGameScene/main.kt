@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.processNextEventInCurrentThread
+import questJournal2.CmdSwitchPlayer
 import javax.accessibility.AccessibleValue
 import kotlin.math.sqrt
 
@@ -221,6 +222,11 @@ data class CmdChooseDialogueOption(
     val optionId: String
 ): GameCommand
 
+data class CmdSwitchActivePlayer(
+    override val playerId: String,
+    val newPlayerId: String
+): GameCommand
+
 data class CmdResetPlayer(
     override val playerId: String
 ): GameCommand
@@ -318,7 +324,7 @@ class GameServer {
         _players.value = map.toMap()
     }
 
-    private fun getPlayerData(playerId: String): PlayerState {
+    fun getPlayerData(playerId: String): PlayerState {
         return _players.value[playerId] ?: initialPlayerState(playerId)
     }
 
@@ -495,12 +501,259 @@ class GameServer {
                         _events.emit(QuestStateChanged(cmd.playerId, QuestState.GOOD_END))
                         _events.emit(ServerMessage(cmd.playerId, "Алхимик получил траву и выдал золото"))
                     }
+
+                    else -> {
+                        _events.emit(ServerMessage(cmd.playerId, "Неизвестный формат диалога"))
+                    }
                 }
+
+            }
+            is CmdSwitchActivePlayer -> {
+
+            }
+
+            is CmdResetPlayer -> {
+                updatePlayer(cmd.playerId) { _ -> initialPlayerState(cmd.playerId)}
+                _events.emit(ServerMessage(cmd.playerId, "Игрок сброшен к начальному состоянию"))
             }
         }
     }
 }
 
+class HudState{
+    val activePlayerIdFlow = MutableStateFlow("Oleg")
+
+    val activePLayerIdUi = mutableStateOf("Oleg")
+
+    val playerSnapShot = mutableStateOf(initialPlayerState("Oleg"))
+
+    val log = mutableStateOf<List<String>>(emptyList())
+}
+
+fun hudLog(hud: HudState, line: String){
+    hud.log.value = (hud.log.value + line).takeLast(20)
+}
+
+fun formatInventory(player: PlayerState) : String{
+    return if(player.inventory.isEmpty()){
+        "Inventory: (пусто)"
+    }else{
+        "Inventory " + player.inventory.entries.joinToString { "${it.key} x${it.value}" }
+    }
+}
+
+fun currentObjective(player: PlayerState) : String{
+    val herbs = herbCount(player)
+
+    return when(player.questState){
+        QuestState.START -> "Подойди к алхимику и начни разговор"
+        QuestState.WAIT_HERB -> {
+            if (herbs < 3) "Собери 3 травы. Сейчас $herbs / 3"
+            else "Вернись к алхимику и отдай 3 травы"
+        }
+
+        QuestState.GOOD_END -> "Квест завершен по хорошей ветке"
+        QuestState.EVIL_END -> "Квест завершен по плохой ветке"
+    }
+}
+
+fun currentZoneText(player: PlayerState): String{
+    return when(player.currentAreaId){
+        "alchemist" -> "Зона: Алхимик"
+        "herb_source" -> "Зона источника травы"
+        else -> "Без зоны :("
+    }
+}
+
+fun formatMemory(memory: NpcMemory): String{
+    return "Встретился = ${memory.hasMet}, Сколько раз поговорил = ${memory.timesTalked}, отдал траву = ${memory.receivedHerb}"
+}
+
+
+fun eventToText(e: GameEvent): String{
+    return when(e){
+        is EnteredArea -> "EnteredArea ${e.areaId}"
+        is LeftArea -> "LeftArea ${e.areaId}"
+        is InteractedWithNpc -> "InteractedWithNpc ${e.npcId}"
+        is InteractedWithHerbSource -> "InteractedWithHerbSource ${e.sourceId}"
+        is InventoryChanged -> "InventoryChanged ${e.itemId} -> ${e.newCount}"
+        is QuestStateChanged -> "QuestStateChanged ${e.newState}"
+        is NpcMemoryChanged -> "NpcMemoryChanged Встретился = ${e.memory.hasMet}, Сколько раз поговорил = ${e.memory.timesTalked}, отдал траву = ${e.memory.receivedHerb}"
+        is ServerMessage -> "Server: ${e.text}"
+    }
+}
+
+fun main() = KoolApplication {
+    val hud = HudState()
+    val server = GameServer()
+
+    addScene {
+        defaultOrbitCamera()
+
+        val playerNode = addColorMesh {
+            generate {
+                cube{
+                    colored()
+                }
+            }
+            shader = KslPbrShader{
+                color{vertexColor()}
+                metallic(0f)
+                roughness(0.25f)
+            }
+        }
+
+        val alchemistNode = addColorMesh {
+            generate {
+                cube{
+                    colored()
+                }
+            }
+            shader = KslPbrShader{
+                color{vertexColor()}
+                metallic(0f)
+                roughness(0.25f)
+            }
+        }
+
+        alchemistNode.transform.translate(3f,0f,0f)
+
+        val herbNode = addColorMesh {
+            generate {
+                cube{
+                    colored()
+                }
+            }
+            shader = KslPbrShader{
+                color{vertexColor()}
+                metallic(0f)
+                roughness(0.25f)
+            }
+        }
+
+
+        herbNode.transform.translate(3f,0f,0f)
+
+        lighting.singleDirectionalLight {
+            setup(Vec3f(-1f,-1f,-1f))
+            setColor(Color.WHITE, 5f)
+        }
+
+        server.start(coroutineScope)
+
+        var lastRenderedX = 0f
+        var lastRenderedZ = 0f
+
+        playerNode.onUpdate{
+            val activeId = hud.activePlayerIdFlow.value
+            val player = server.getPlayerData(activeId)
+
+            val dx = player.posX - lastRenderedX
+            val dz = player.posZ - lastRenderedZ
+
+            playerNode.transform.translate(dx, 0f, dz)
+
+            lastRenderedX = player.posX
+            lastRenderedZ = player.posZ
+        }
+
+        alchemistNode.onUpdate{
+            transform.rotate(20f.deg * Time.deltaT, Vec3f.Y_AXIS)
+        }
+        herbNode.onUpdate{
+            transform.rotate(20f.deg * Time.deltaT, Vec3f.Y_AXIS)
+        }
+    }
+
+    addScene {
+        setupUiScene(ClearColorLoad)
+
+        hud.activePlayerIdFlow
+            .flatMapLatest { pid ->
+                server.players.map { map ->
+                    map[pid] ?: initialPlayerState(pid)
+                }
+            }
+            .onEach { player ->
+                hud.playerSnapShot.value = player
+            }
+            .launchIn(coroutineScope)
+        hud.activePlayerIdFlow
+            .flatMapLatest { pid ->
+                server.events.filter { it.playerId == pid }
+            }
+            .map{ event ->
+                eventToText(event)
+            }
+            .onEach { line ->
+                hudLog(hud, "[${hud.activePLayerIdUi.value}] $line")
+            }
+            .launchIn(coroutineScope)
+
+        addPanelSurface {
+            modifier
+                .align(AlignmentX.Start, AlignmentY.Top)
+                .margin(16.dp)
+                .background(RoundRectBackground(Color(0f, 0f, 0f, 0.6f), 14.dp))
+                .padding(12.dp)
+
+            Column {
+                val player = hud.playerSnapShot.use()
+                val dialogue = buildAlchemistDialogue(player)
+
+                Text("Игрок: ${hud.activePLayerIdUi.use()}"){ modifier.margin(bottom = sizes.gap) }
+                Text("Позиция: x=${"%.1f".format(player.posX)} z=${"%.1f".format(player.posZ)}"){}
+                Text("Quest State: ${player.questState}"){ modifier.font(sizes.smallText) }
+                Text(currentObjective(player)){ modifier.font(sizes.smallText) }
+                Text(formatInventory(player)){ modifier.font(sizes.smallText).margin(bottom = sizes.smallGap) }
+                Text("Gold: ${player.gold}"){ modifier.font(sizes.smallText) }
+                Text("Hint: ${player.hintText}"){ modifier.font(sizes.smallText) }
+                Text("Npc Memory: ${formatMemory(player.alchemistMemory)}"){ modifier.font(sizes.smallText).margin(bottom = sizes.smallGap) }
+
+                Row {
+                    Button("Сменить игрока"){
+                        modifier.margin(end = 8.dp).onClick{
+                            val newId = if(hud.activePLayerIdUi.value == "Oleg") "Stas" else "Oleg"
+
+                            hud.activePLayerIdUi.value = newId
+                            hud.activePlayerIdFlow.value = newId
+                        }
+                    }
+                    Button("Сбросить игрока"){
+                        modifier.onClick{
+                            server.trySend(CmdResetPlayer(player.playerId))
+                        }
+                    }
+                }
+
+                Text("Движение в мире:"){ modifier.margin(top = sizes.gap) }
+
+                Row {
+                    Button("Лево"){
+                        modifier.margin(end = 8.dp).onClick {
+                            server.trySend(CmdMovePlayer(player.playerId, dx = -0.5f, dz = 0f))
+                        }
+                    }
+                    Button("Право"){
+                        modifier.margin(end = 8.dp).onClick {
+                            server.trySend(CmdMovePlayer(player.playerId, dx = 0.5f, dz = 0f))
+                        }
+                    }
+                    Button("Вперед"){
+                        modifier.margin(end = 8.dp).onClick {
+                            server.trySend(CmdMovePlayer(player.playerId, dx = 0f, dz = -0.5f))
+                        }
+                    }
+                    Button("Назад"){
+                        modifier.margin(end = 8.dp).onClick {
+                            server.trySend(CmdMovePlayer(player.playerId, dx = 0f, dz = 0.5f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 
 
