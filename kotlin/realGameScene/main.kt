@@ -35,7 +35,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.processNextEventInCurrentThread
-import questJournal2.CmdSwitchPlayer
 import javax.accessibility.AccessibleValue
 import kotlin.math.sqrt
 
@@ -57,9 +56,10 @@ enum class WorldObjectType{
 data class WorldObjectDef(
     val id: String,
     val type: WorldObjectType,
-    val x: Float,
-    val z: Float,
-    val interactRadius: Float
+    var x: Float,
+    var z: Float,
+    val interactRadius: Float,
+    val trajectory: List<Pair<Float, Float>>
 )
 
 data class NpcMemory(
@@ -217,6 +217,11 @@ data class CmdMovePlayer(
     val dz: Float
 ): GameCommand
 
+data class CmdMoveNpc(
+    override val playerId: String,
+    val objId: String
+): GameCommand
+
 data class CmdInteract(
     override val playerId: String
 ): GameCommand
@@ -281,27 +286,39 @@ data class ServerMessage(
 ): GameEvent
 
 class GameServer {
-    val worldObjects = listOf(
+    val worldObjects = mutableListOf(
         WorldObjectDef(
             "alchemist",
             WorldObjectType.ALCHEMIST,
             -3f,
             0f,
-            1.7f
+            1.7f,
+            listOf(
+                -3f to -1f,
+                -3f to -2f,
+                -4f to -2f,
+                -5f to -2f,
+                -5f to -1f,
+                -5f to 0f,
+                -4f to 0f,
+                -3f to 0f
+            )
         ),
         WorldObjectDef(
             "herb_source",
             WorldObjectType.HERB_SOURCE,
             3f,
             0f,
-            1.7f
+            1.7f,
+            emptyList()
         ),
         WorldObjectDef(
             "treasure_box",
             WorldObjectType.CHEST,
             5f,
             0f,
-            2f
+            2f,
+            emptyList()
         )
     )
 
@@ -403,6 +420,27 @@ class GameServer {
         }
     }
 
+    private var debounce: Boolean = true
+    private suspend fun startMoveNpc(id: String) {
+        val index = worldObjects.indexOfFirst { it.id == id }
+        val trajectory = worldObjects.find { it.id == id }?.trajectory ?: emptyList()
+        coroutineScope {
+            debounce = true
+            while (true) {
+                for (pos in trajectory){
+                    if (debounce != true) break
+                    val obj = worldObjects[index]
+                    worldObjects[index] = obj.copy(x = pos.second, z = pos.first)
+                    delay(1000)
+                }
+            }
+        }
+    }
+
+    private fun randomChance(probability: Float): Boolean {
+        return kotlin.random.Random.nextFloat() < probability
+    }
+
     private suspend fun processCommand(cmd: GameCommand){
         when(cmd){
             is CmdMovePlayer -> {
@@ -413,6 +451,10 @@ class GameServer {
                     )
                 }
                 refreshPlayerArea(cmd.playerId)
+            }
+
+            is CmdMoveNpc -> {
+                startMoveNpc(cmd.objId)
             }
 
             is CmdInteract -> {
@@ -426,19 +468,27 @@ class GameServer {
 
                 when (obj.type){
                     WorldObjectType.ALCHEMIST -> {
+                        val player = getPlayerData(cmd.playerId)
+                        val distance = distance2D(player.posX, player.posZ, obj.x, obj.x)
+                        if (distance >= 2f){
+                            _events.emit(ServerMessage(cmd.playerId, "Ты отошел слишком далеко от Алхимика"))
+                            return
+                        }
+
                         if (player.alchemistMemory.sawPlayerNearSource == true){
                             _events.emit(ServerMessage(cmd.playerId, "Вижу, ты хотя бы дошёл до места, где растёт трава, ты ее принёс?"))
                         }
+
                         val oldMemory = player.alchemistMemory
                         val newMemory = oldMemory.copy(
                             hasMet = true,
                             timesTalked = oldMemory.timesTalked + 1
                         )
-
                         updatePlayer(cmd.playerId) { p ->
                             p.copy(alchemistMemory = newMemory)
                         }
 
+                        debounce = false
                         _events.emit(InteractedWithNpc(cmd.playerId, obj.id))
                         _events.emit(NpcMemoryChanged(cmd.playerId, newMemory))
                     }
@@ -446,6 +496,11 @@ class GameServer {
                     WorldObjectType.HERB_SOURCE -> {
                         if (player.questState != QuestState.WAIT_HERB){
                             _events.emit(ServerMessage(cmd.playerId, "Трава сейчас тебе не нужна - сначала возьми квест"))
+                            return
+                        }
+
+                        if(randomChance(0.5f)){
+                            _events.emit(ServerMessage(cmd.playerId, "Промах"))
                             return
                         }
 
@@ -460,7 +515,6 @@ class GameServer {
                         val oldCount = herbCount(player)
                         val newCount = oldCount + 1
                         val newInventory = player.inventory + ("herb" to newCount)
-
                         updatePlayer(cmd.playerId){p ->
                             p.copy(inventory = newInventory)
                         }
@@ -481,17 +535,9 @@ class GameServer {
 
             is CmdChooseDialogueOption -> {
                 val player = getPlayerData(cmd.playerId)
-                val distance = distance2D(player.posX, player.posZ, 5f, 0f)
-                // 5f 0f это позиция алхимика
-
 
                 if (player.currentAreaId != "alchemist"){
                     _events.emit(ServerMessage(cmd.playerId, "Сначала подойди к алхимику"))
-                    return
-                }
-
-                if (distance >= 2f){
-                    _events.emit(ServerMessage(cmd.playerId, "Ты отошел слишком далеко от Алхимика"))
                     return
                 }
 
