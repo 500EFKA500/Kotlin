@@ -19,3 +19,14 @@ dependencies {
     implementation("de.fabmax.kool:kool-core:0.19.0")
     implementation("de.fabmax.kool:kool-physics:0.19.0")
 }
+
+tasks.test {
+    useJUnitPlatform()
+}
+kotlin {
+    jvmToolchain(17)
+}
+val compileKotlin: KotlinCompile by tasks
+compileKotlin.compilerOptions {
+    freeCompilerArgs.set(listOf("-Xnested-type-aliases"))
+}
