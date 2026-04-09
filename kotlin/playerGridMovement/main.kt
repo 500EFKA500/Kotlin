@@ -396,6 +396,7 @@ class GameServer {
     )
 
     val players: StateFlow<Map<String, PlayerState>> = _players.asStateFlow()
+    private val _treasureChestVisible = MutableStateFlow(false)
 
     fun start(scope: kotlinx.coroutines.CoroutineScope) {
         scope.launch {
@@ -637,7 +638,7 @@ class GameServer {
 
                 when(cmd.optionId){
                     "accepted_help" -> {
-                        val radiusHerb = distance2D(player.posX, player.posZ, 3f, 0f)
+                        val radiusHerb = distance2D(player.gridX.toFloat(), player.gridZ.toFloat(), 3f, 0f)
                         if (radiusHerb <= 1.7f){
                             if (player.questState != QuestState.START){
                                 _events.emit(ServerMessage(cmd.playerId, "Путь помощи можно выбрать только в начале квеста"))
@@ -702,6 +703,14 @@ class GameServer {
             is CmdResetPlayer -> {
                 updatePlayer(cmd.playerId) { _ -> initialPlayerState(cmd.playerId) }
                 _events.emit(ServerMessage(cmd.playerId, "Игрок сброшен к начальному уровню"))
+            }
+
+            is CmdSwitchActivePlayer -> {
+                if (_players.value.containsKey(cmd.newPlayerId)) {
+                    _events.emit(ServerMessage(cmd.playerId, "Активный игрок переключен на ${cmd.newPlayerId}"))
+                } else {
+                    _events.emit(ServerMessage(cmd.playerId, "Игрок ${cmd.newPlayerId} не найден"))
+                }
             }
         }
     }
@@ -769,6 +778,8 @@ fun eventToText(e: GameEvent): String{
         is InventoryChanged -> "InventoryChanged ${e.itemId} -> ${e.newCount}"
         is QuestStateChanged -> "QuestStateChanged ${e.newState}"
         is NpcMemoryChanged -> "NpcMemoryChanged Встретился = ${e.memory.hasMet}, Сколько раз поговорил = ${e.memory.timesTalked}, отдал траву = ${e.memory.receivedHerb}"
+        is InteractedWithChest -> "InteractedWithChest ${e.chestId}"
+        is GoldCountChanged -> "GoldCountChanged ${e.newCount}"
         is ServerMessage -> "Server: ${e.text}"
     }
 }
