@@ -118,6 +118,7 @@ data class PlayerState(
     val playerId: String,
     val gridX: Int,
     val gridZ: Int,
+    val rotate: Float,
     val questState: QuestState,
     val inventory: Map<String, Int>,
     val gold: Int,
@@ -135,6 +136,7 @@ fun initialPlayerState(playerId: String): PlayerState {
             "Stas",
             0,
             0,
+            0f,
             QuestState.START,
             emptyMap(),
             0,
@@ -152,6 +154,7 @@ fun initialPlayerState(playerId: String): PlayerState {
             "Oleg",
             0,
             0,
+            0f,
             QuestState.START,
             emptyMap(),
             0,
@@ -254,6 +257,11 @@ data class CmdStepMove(
     val stepZ: Int
 ): GameCommand
 
+data class CmdRotate(
+    override val playerId: String,
+    val rotate: Float
+): GameCommand
+
 data class CmdInteract(
     override val playerId: String
 ): GameCommand
@@ -340,14 +348,14 @@ data class MovedBlocked(
 ): GameEvent
 
 class GameServer {
-    
+
     // Размер карты, игрок может ходить только в ее пределах
-    
+
     private val minX = -5
     private val maxX = 5
     private val minZ = -4
     private val maxZ = 4
-    
+
     // Подготовка клеток, на которые нельзя зайти (занятые)
     private val blockedCells = setOf(
         GridPos(-1, 1),
@@ -355,7 +363,7 @@ class GameServer {
         GridPos(1, 1),
         GridPos(1, 0)
     )
-    
+
     val worldObjects = mutableListOf(
         WorldObjectDef(
             "alchemist",
@@ -503,7 +511,7 @@ class GameServer {
                 val player = getPlayerData(cmd.playerId)
                 val targetX = player.gridX + cmd.stepX
                 val targetZ = player.gridZ + cmd.stepZ
-                
+
                 val newFacing =
                     when{
                         cmd.stepX < 0 -> Facing.LEFT
@@ -511,11 +519,11 @@ class GameServer {
                         cmd.stepZ < 0 -> Facing.FORWARD
                         else -> Facing.BACK
                     }
-                
+
                 if (!isCellInsideMap(targetX, targetZ)){
                     _events.emit(ServerMessage(cmd.playerId, "Нельзя уйти за границы карты"))
                     _events.emit(MovedBlocked(cmd.playerId, targetX, targetZ))
-                    
+
                     updatePlayer(cmd.playerId){ p ->
                         p.copy(facing = newFacing)
                     }
@@ -530,7 +538,7 @@ class GameServer {
                     }
                     return
                 }
-                
+
                 updatePlayer(cmd.playerId){ p ->
                     p.copy(
                         gridX = targetX,
@@ -538,9 +546,22 @@ class GameServer {
                         facing = newFacing
                     )
                 }
-                
+
                 _events.emit(PlayerMoved(cmd.playerId, targetX, targetZ))
-                
+
+                refreshPlayerArea(cmd.playerId)
+            }
+
+            is CmdRotate -> {
+                val player = getPlayerData(cmd.playerId)
+                val targetRotate = player.rotate + cmd.rotate
+
+                updatePlayer(cmd.playerId){ p ->
+                    p.copy(
+                        rotate = targetRotate
+                    )
+                }
+
                 refreshPlayerArea(cmd.playerId)
             }
 
@@ -792,20 +813,20 @@ fun main() = KoolApplication {
         defaultOrbitCamera()
 
         // Строим пол из мелких кубиков
-        for (x in -5..5){
-            for (z in -4..4){
+        for (x in -5..5) {
+            for (z in -4..4) {
                 addColorMesh {
-                    generate { cube{colored()} }
+                    generate { cube { colored() } }
 
-                    shader = KslPbrShader{
-                        color{vertexColor()}
+                    shader = KslPbrShader {
+                        color { vertexColor() }
                         metallic(0f)
                         roughness(0.25f)
                     }
                 }
-                    .transform.translate(x.toFloat(), -1.2f,  z.toFloat())
-                    // Сдвигаем плитку (кубы - пол) в мире
-                    // y = -1.2f опускаем пол ниже игрока
+                    .transform.translate(x.toFloat(), -1.2f, z.toFloat())
+                // Сдвигаем плитку (кубы - пол) в мире
+                // y = -1.2f опускаем пол ниже игрока
             }
         }
 
@@ -816,27 +837,27 @@ fun main() = KoolApplication {
             GridPos(1, 0)
         )
 
-        for (cell in wallCells){
+        for (cell in wallCells) {
             addColorMesh {
-                generate { cube{colored()} }
+                generate { cube { colored() } }
 
-                shader = KslPbrShader{
-                    color{vertexColor()}
+                shader = KslPbrShader {
+                    color { vertexColor() }
                     metallic(0f)
                     roughness(0.25f)
                 }
             }
-                .transform.translate(cell.x.toFloat(), -1.2f,  cell.z.toFloat())
+                .transform.translate(cell.x.toFloat(), -1.2f, cell.z.toFloat())
         }
-        
+
         val playerNode = addColorMesh {
             generate {
-                cube{
+                cube {
                     colored()
                 }
             }
-            shader = KslPbrShader{
-                color{vertexColor()}
+            shader = KslPbrShader {
+                color { vertexColor() }
                 metallic(0f)
                 roughness(0.25f)
             }
@@ -844,79 +865,86 @@ fun main() = KoolApplication {
 
         val alchemistNode = addColorMesh {
             generate {
-                cube{
+                cube {
                     colored()
                 }
             }
-            shader = KslPbrShader{
-                color{vertexColor()}
+            shader = KslPbrShader {
+                color { vertexColor() }
                 metallic(0f)
                 roughness(0.25f)
             }
         }
 
-        alchemistNode.transform.translate(3f,0f,0f)
+        alchemistNode.transform.translate(3f, 0f, 0f)
 
         val herbNode = addColorMesh {
             generate {
-                cube{
+                cube {
                     colored()
                 }
             }
-            shader = KslPbrShader{
-                color{vertexColor()}
+            shader = KslPbrShader {
+                color { vertexColor() }
                 metallic(0f)
                 roughness(0.25f)
             }
         }
 
 
-        herbNode.transform.translate(3f,0f,0f)
+        herbNode.transform.translate(3f, 0f, 0f)
 
         lighting.singleDirectionalLight {
-            setup(Vec3f(-1f,-1f,-1f))
+            setup(Vec3f(-1f, -1f, -1f))
             setColor(Color.WHITE, 5f)
         }
-        
+
         server.start(coroutineScope)
-        
+
         var renderX = 0f
         var renderZ = 0f
+        var renderRotate = 0f
+
         var lastAppliedX = 0f
         var lastAppliedZ = 0f
-        
+        var lastAppliedRotate = 0f
+
         var lastAppliedYaw = 0f
         // yaw - какой поворот уже был применен к PlayerNode
-        
-        playerNode.onUpdate{
+
+        playerNode.onUpdate {
             val activeId = hud.activePlayerIdFlow.value
             val player = server.getPlayerData(activeId)
-            
+
             val targetX = player.gridX.toFloat()
             val targetZ = player.gridZ.toFloat()
-            
+            val targetRotate = player.rotate
+
             // Плавность перемещения
             // чем больше коэффицент, тем быстрее куб переходит на новую клетку
             val speed = Time.deltaT * 8f
-            val t = if(speed > 1f) 1f else speed
-            
+            val t = if (speed > 1f) 1f else speed
+
             renderX = lerp(renderX, targetX, t)
             renderZ = lerp(renderZ, targetZ, t)
-            
+            renderRotate = lerp(renderRotate, targetRotate, t)
+
             val dx = renderX - lastAppliedX
             val dz = renderZ - lastAppliedZ
-            
+            val rotate = renderRotate - lastAppliedRotate
+
             playerNode.transform.translate(dx, 0f, dz)
-            
+            playerNode.transform.rotate(rotate.deg, Vec3f.Y_AXIS)
+
             lastAppliedX = renderX
             lastAppliedZ = renderZ
-            
+
             // Поварачиваем игрока по направлению
             val targetYaw = facingToYawDeg(player.facing)
             val yawDelta = targetYaw - lastAppliedYaw
-            
+
             playerNode.transform.rotate(yawDelta.deg, Vec3f.Y_AXIS)
-            
+
             lastAppliedYaw = targetYaw
         }
     }
@@ -938,7 +966,7 @@ fun main() = KoolApplication {
             .flatMapLatest { pid ->
                 server.events.filter { it.playerId == pid }
             }
-            .map{ event ->
+            .map { event ->
                 eventToText(event)
             }
             .onEach { line ->
@@ -957,105 +985,128 @@ fun main() = KoolApplication {
                 val player = hud.playerSnapShot.use()
                 val dialogue = buildAlchemistDialogue(player)
 
-                Text("Игрок: ${hud.activePLayerIdUi.use()}"){ modifier.margin(bottom = sizes.gap) }
-                Text("Позиция: x=${"%.1f".format(player.gridX)} z=${"%.1f".format(player.gridZ)}"){}
-                Text("Смотрит: ${player.facing}"){modifier.font(sizes.smallText).margin(bottom = sizes.smallGap)}
-                Text("Quest State: ${player.questState}"){ modifier.font(sizes.smallText) }
-                Text(currentObjective(player)){ modifier.font(sizes.smallText) }
-                Text(formatInventory(player)){ modifier.font(sizes.smallText).margin(bottom = sizes.smallGap) }
-                Text("Gold: ${player.gold}"){ modifier.font(sizes.smallText) }
-                Text("Hint: ${player.hintText}"){ modifier.font(sizes.smallText) }
-                Text("Npc Memory: ${formatMemory(player.alchemistMemory)}"){ modifier.font(sizes.smallText).margin(bottom = sizes.smallGap) }
+                Text("Игрок: ${hud.activePLayerIdUi.use()}") { modifier.margin(bottom = sizes.gap) }
+                Text("Позиция: x=${"%.1f".format(player.gridX)} z=${"%.1f".format(player.gridZ)}") {}
+                Text("Смотрит: ${player.facing}") { modifier.font(sizes.smallText).margin(bottom = sizes.smallGap) }
+                Text("Quest State: ${player.questState}") { modifier.font(sizes.smallText) }
+                Text(currentObjective(player)) { modifier.font(sizes.smallText) }
+                Text(formatInventory(player)) { modifier.font(sizes.smallText).margin(bottom = sizes.smallGap) }
+                Text("Gold: ${player.gold}") { modifier.font(sizes.smallText) }
+                Text("Hint: ${player.hintText}") { modifier.font(sizes.smallText) }
+                Text("Npc Memory: ${formatMemory(player.alchemistMemory)}") {
+                    modifier.font(sizes.smallText).margin(bottom = sizes.smallGap)
+                }
 
                 Row {
-                    Button("Сменить игрока"){
-                        modifier.margin(end = 8.dp).onClick{
-                            val newId = if(hud.activePLayerIdUi.value == "Oleg") "Stas" else "Oleg"
+                    Button("Сменить игрока") {
+                        modifier.margin(end = 8.dp).onClick {
+                            val newId = if (hud.activePLayerIdUi.value == "Oleg") "Stas" else "Oleg"
 
                             hud.activePLayerIdUi.value = newId
                             hud.activePlayerIdFlow.value = newId
                         }
                     }
-                    Button("Сбросить игрока"){
-                        modifier.onClick{
+                    Button("Сбросить игрока") {
+                        modifier.onClick {
                             server.trySend(CmdResetPlayer(player.playerId))
                         }
                     }
                 }
 
-                Text("Движение в мире:"){ modifier.margin(top = sizes.gap) }
+                Text("Движение в мире:") { modifier.margin(top = sizes.gap) }
 
                 Row {
-                    Button("Лево"){
+                    Button("Лево") {
                         modifier.margin(end = 8.dp).onClick {
                             server.trySend(CmdStepMove(player.playerId, stepX = -1, stepZ = 0))
                         }
                     }
-                    Button("Право"){
+                    Button("Право") {
                         modifier.margin(end = 8.dp).onClick {
                             server.trySend(CmdStepMove(player.playerId, stepX = 1, stepZ = 0))
                         }
                     }
-                    Button("Вперед"){
+                    Button("Вперед") {
                         modifier.margin(end = 8.dp).onClick {
                             server.trySend(CmdStepMove(player.playerId, stepX = 0, stepZ = -1))
                         }
                     }
-                    Button("Назад"){
+                    Button("Назад") {
                         modifier.margin(end = 8.dp).onClick {
                             server.trySend(CmdStepMove(player.playerId, stepX = 0, stepZ = -1))
                         }
                     }
                 }
                 Row {
-                    Button("вращать в лево"){
+                    Button("вращать в лево") {
                         modifier.margin(end = 8.dp).onClick {
-                            server.trySend(CmdStepMove(player.playerId, stepX = -1, stepZ = 0))
+                            server.trySend(CmdRotate(player.playerId, rotate = -10f))
                         }
                     }
-                    Button("вращать в право"){
+                    Button("вращать в право") {
                         modifier.margin(end = 8.dp).onClick {
-                            server.trySend(CmdStepMove(player.playerId, stepX = 1, stepZ = 0))
+                            server.trySend(CmdRotate(player.playerId, rotate = 10f))
                         }
                     }
-                }
-                Text("Взаимодействия:"){ modifier.margin(top = sizes.gap) }
+                    Button("Добавить кубик") {
+                        modifier.margin(end = 8.dp).onClick {
+                            val cubeNode = addColorMesh {
+                                generate {
+                                    cube {
+                                        colored()
+                                    }
+                                }
+                                shader = KslPbrShader {
+                                    color { vertexColor() }
+                                    metallic(0f)
+                                    roughness(0.25f)
+                                }
+                            }
+                            var pos: Float = 0f
+                            pos += 1.7f
 
-                Row {
-                    Button("Потрогать ближайшего"){
-                        modifier.margin(end = 8.dp).onClick{
-                            server.trySend(CmdInteract(player.playerId))
+                            cubeNode.transform.translate(3f, pos, 0f)
+
                         }
                     }
-                }
+                    Text("Взаимодействия:") { modifier.margin(top = sizes.gap) }
 
-                Text(dialogue.npcId){ modifier.margin(top = sizes.gap) }
-                Text(dialogue.text){ modifier.margin(bottom = sizes.smallGap) }
-
-                if(dialogue.option.isEmpty()){
-                    Text("Нет доступных варинатов ответа"){
-                        modifier.font(sizes.smallText).margin(bottom = sizes.gap)
+                    Row {
+                        Button("Потрогать ближайшего") {
+                            modifier.margin(end = 8.dp).onClick {
+                                server.trySend(CmdInteract(player.playerId))
+                            }
+                        }
                     }
-                }else{
-                    Row{
-                        for (option in dialogue.option){
-                            Button(option.text){
-                                modifier.margin(end = 8.dp).onClick{
-                                    server.trySend(
-                                        CmdChooseDialogueOption(
-                                            player.playerId,
-                                            option.id
+
+                    Text(dialogue.npcId) { modifier.margin(top = sizes.gap) }
+                    Text(dialogue.text) { modifier.margin(bottom = sizes.smallGap) }
+
+                    if (dialogue.option.isEmpty()) {
+                        Text("Нет доступных варинатов ответа") {
+                            modifier.font(sizes.smallText).margin(bottom = sizes.gap)
+                        }
+                    } else {
+                        Row {
+                            for (option in dialogue.option) {
+                                Button(option.text) {
+                                    modifier.margin(end = 8.dp).onClick {
+                                        server.trySend(
+                                            CmdChooseDialogueOption(
+                                                player.playerId,
+                                                option.id
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                Text("Лог: "){modifier.margin(top = sizes.gap)}
+                    Text("Лог: ") { modifier.margin(top = sizes.gap) }
 
-                for(line in hud.log.use()){
-                    Text(line){ modifier.font(sizes.smallText) }
+                    for (line in hud.log.use()) {
+                        Text(line) { modifier.font(sizes.smallText) }
+                    }
                 }
             }
         }
