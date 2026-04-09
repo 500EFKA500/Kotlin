@@ -254,6 +254,10 @@ data class CmdStepMove(
     val stepZ: Int
 ): GameCommand
 
+data class CmdInteract(
+    override val playerId: String
+): GameCommand
+
 data class CmdChooseDialogueOption(
     override val playerId: String,
     val optionId: String
@@ -311,6 +315,16 @@ data class NpcMemoryChanged(
 data class ServerMessage(
     override val playerId: String,
     val text: String
+): GameEvent
+
+data class InteractedWithChest(
+    override val playerId: String,
+    val chestId: String
+): GameEvent
+
+data class GoldCountChanged(
+    override val playerId: String,
+    val newCount: Int
 ): GameEvent
 
 data class PlayerMoved(
