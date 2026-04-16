@@ -2,11 +2,14 @@ package playerGridMovement
 
 import de.fabmax.kool.KoolApplication           // KoolApplication - запускает Kool-приложение (окно + цикл рендера)
 import de.fabmax.kool.addScene                  // addScene - функция "добавь сцену" в приложение (у тебя она просила отдельный импорт)
+import de.fabmax.kool.math.Vec2f
 import de.fabmax.kool.math.Vec3f                // Vec3f - 3D-вектор (x, y, z), как координаты / направление
 import de.fabmax.kool.math.deg                  // deg - превращает число в "градусы" (угол)
 import de.fabmax.kool.modules.audio.synth.SampleNode
 import de.fabmax.kool.scene.*                   // scene.* - Scene, defaultOrbitCamera, addColorMesh, lighting и т.д.
 import de.fabmax.kool.modules.ksl.KslPbrShader  // KslPbrShader - готовый PBR-шейдер (материал)
+import de.fabmax.kool.pipeline.*
+import de.fabmax.kool.platform.ImageDecoder
 import de.fabmax.kool.util.Color                // Color - цвет (RGBA)
 import de.fabmax.kool.util.Time                 // Time.deltaT - сколько секунд прошло между кадрами
 import de.fabmax.kool.pipeline.ClearColorLoad   // ClearColorLoad - режим: "не очищай экран, оставь то что уже нарисовано"
@@ -39,6 +42,12 @@ import kotlinx.coroutines.processNextEventInCurrentThread
 import kotlinx.serialization.modules.SerializersModule
 import javax.accessibility.AccessibleValue
 import javax.management.ValueExp
+import java.io.File
+import javax.imageio.ImageIO
+import javax.imageio.metadata.IIOMetadataNode
+import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.LineEvent
+import kotlin.concurrent.thread
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -750,6 +759,120 @@ class HudState{
     val playerSnapShot = mutableStateOf(initialPlayerState("Oleg"))
 
     val log = mutableStateOf<List<String>>(emptyList())
+
+    val isWinVisible = mutableStateOf(false)
+    val winGifProvider = mutableStateOf<ImageProvider?>(null)
+    val hasPlayedWinSound = mutableStateOf(false)
+}
+
+private data class GifFrame(
+    val imageData: BufferedImageData2d,
+    val delayMs: Int
+)
+
+private class AnimatedGifImageProvider(
+    private val frames: List<GifFrame>,
+    private val texture: Texture2d
+) : ImageProvider {
+    override val uvTopLeft = Vec2f(0f, 0f)
+    override val uvTopRight = Vec2f(1f, 0f)
+    override val uvBottomLeft = Vec2f(0f, 1f)
+    override val uvBottomRight = Vec2f(1f, 1f)
+
+    override val isDynamicSize: Boolean = true
+
+    private val loopDurationMs = frames.sumOf { it.delayMs.coerceAtLeast(16) }.coerceAtLeast(16)
+    private var currentFrame = -1
+    private var startTimeSec = Time.gameTime
+
+    override fun getTexture(imgWidthPx: Float, imgHeightPx: Float): Texture2d {
+        val elapsedMs = ((Time.gameTime - startTimeSec) * 1000.0).toInt()
+        val loopTimeMs = ((elapsedMs % loopDurationMs) + loopDurationMs) % loopDurationMs
+
+        var frameIndex = 0
+        var acc = 0
+        for (i in frames.indices) {
+            acc += frames[i].delayMs.coerceAtLeast(16)
+            if (loopTimeMs < acc) {
+                frameIndex = i
+                break
+            }
+        }
+
+        if (frameIndex != currentFrame) {
+            texture.uploadLazy(frames[frameIndex].imageData)
+            currentFrame = frameIndex
+        }
+        return texture
+    }
+
+    companion object {
+        fun fromPath(path: String): AnimatedGifImageProvider? {
+            val file = File(path)
+            if (!file.exists()) return null
+
+            val frames = decodeGifFrames(file)
+            if (frames.isEmpty()) return null
+
+            val texture = Texture2d(
+                data = frames.first().imageData,
+                mipMapping = MipMapping.Off,
+                samplerSettings = SamplerSettings(maxAnisotropy = 1),
+                name = "win-gif-texture"
+            )
+            return AnimatedGifImageProvider(frames, texture)
+        }
+
+        private fun decodeGifFrames(file: File): List<GifFrame> {
+            val result = mutableListOf<GifFrame>()
+            val reader = ImageIO.getImageReadersByFormatName("gif").asSequence().firstOrNull() ?: return emptyList()
+            ImageIO.createImageInputStream(file).use { input ->
+                if (input == null) return emptyList()
+                reader.input = input
+                val frameCount = reader.getNumImages(true)
+                for (i in 0 until frameCount) {
+                    val buffered = reader.read(i)
+                    val metadata = reader.getImageMetadata(i)
+                    val root = metadata.getAsTree("javax_imageio_gif_image_1.0") as? IIOMetadataNode
+                    val gce = root?.getElementsByTagName("GraphicControlExtension")?.item(0) as? IIOMetadataNode
+                    val delayCs = gce?.getAttribute("delayTime")?.toIntOrNull() ?: 6
+                    val imageData = ImageDecoder.loadBufferedImage(buffered, TexFormat.RGBA)
+                    result += GifFrame(imageData, delayCs * 10)
+                }
+            }
+            reader.dispose()
+            return result
+        }
+    }
+}
+
+private fun playWinSoundIfExists(hud: HudState) {
+    if (hud.hasPlayedWinSound.value) return
+
+    val soundFile = listOf(
+        File("kotlin/playerGridMovement/win.wav"),
+        File("kotlin/playerGridMovement/win.ogg"),
+        File("kotlin/playerGridMovement/win.mp3")
+    ).firstOrNull { it.exists() } ?: return
+
+    hud.hasPlayedWinSound.value = true
+
+    thread(isDaemon = true, name = "win-sound-player") {
+        runCatching {
+            AudioSystem.getAudioInputStream(soundFile).use { input ->
+                val clip = AudioSystem.getClip()
+                clip.addLineListener { event ->
+                    if (event.type == LineEvent.Type.STOP) {
+                        clip.close()
+                    }
+                }
+                clip.open(input)
+                clip.start()
+            }
+        }.onFailure {
+            hud.hasPlayedWinSound.value = false
+        }
+    }
 }
 
 fun hudLog(hud: HudState, line: String){
@@ -980,6 +1103,17 @@ fun main() = KoolApplication {
             }
             .launchIn(coroutineScope)
 
+        hud.activePlayerIdFlow
+            .flatMapLatest { pid ->
+                server.events.filter { it.playerId == pid }
+            }
+            .filter { it is Win }
+            .onEach {
+                hud.isWinVisible.value = true
+                playWinSoundIfExists(hud)
+            }
+            .launchIn(coroutineScope)
+
         addPanelSurface {
             modifier
                 .align(AlignmentX.Start, AlignmentY.Top)
@@ -1118,12 +1252,53 @@ fun main() = KoolApplication {
         }
         addPanelSurface {
             modifier
-                .align(AlignmentX.Start, AlignmentY.Top)
-                .margin(16.dp)
-                .background(RoundRectBackground(Color(0f, 0f, 0f, 0.6f), 14.dp))
-                .padding(12.dp)
+                .align(AlignmentX.Center, AlignmentY.Center)
 
+            if (hud.isWinVisible.use()) {
+                Column {
+                    Text("победа") {
+                        modifier
+                            .background(RoundRectBackground(Color(0f, 0f, 0f, 0.75f), 14.dp))
+                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                    }
 
+                    var provider = hud.winGifProvider.use()
+                    if (provider == null) {
+                        provider = AnimatedGifImageProvider.fromPath("kotlin/playerGridMovement/win.gif")
+                        if (provider != null) {
+                            hud.winGifProvider.value = provider
+                        }
+                    }
+                    if (provider != null) {
+                        Image {
+                            modifier
+                                .margin(top = 8.dp)
+                                .width(360.dp)
+                                .height(220.dp)
+                                .imageProvider(provider)
+                                .imageSize(ImageSize.FitContent)
+                                .background(RoundRectBackground(Color(0f, 0f, 0f, 0.4f), 8.dp))
+                                .padding(6.dp)
+                        }
+                    } else {
+                        Text("GIF не найдена: kotlin/playerGridMovement/win.gif") {
+                            modifier.margin(top = 8.dp).background(
+                                RoundRectBackground(Color(0f, 0f, 0f, 0.55f), 8.dp)
+                            ).padding(horizontal = 10.dp, vertical = 6.dp)
+                        }
+                    }
+
+                    val soundExists = File("kotlin/playerGridMovement/win.wav").exists() ||
+                        File("kotlin/playerGridMovement/win.ogg").exists() ||
+                        File("kotlin/playerGridMovement/win.mp3").exists()
+                    Text(
+                        if (soundExists) "Звук победы найден"
+                        else "Добавь звук: win.wav / win.ogg / win.mp3"
+                    ) {
+                        modifier.margin(top = 6.dp).font(sizes.smallText)
+                    }
+                }
+            }
         }
     }
 }
@@ -1131,4 +1306,3 @@ fun main() = KoolApplication {
 // 1.1 c)
 // 1.2 d)
 // 1.3 d)
-
