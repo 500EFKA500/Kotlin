@@ -325,33 +325,8 @@ class GameServer{
 
     fun trySend(cmd: GameCommand): Boolean = _commands.tryEmit(cmd)
 
-    private val _players = MutableStateFlow(
-        mapOf(
-            "Oleg" to initialPlayerState("Oleg"),
-            "Stas" to initialPlayerState("Stas")
-        )
-    )
 
-    val players: StateFlow<Map<String, PlayerState>> = _players.asStateFlow()
 
-    fun start(scope: kotlinx.coroutines.CoroutineScope) {
-        scope.launch {
-            commands.collect { cmd ->
-                processCommand(cmd)
-            }
-        }
-    }
-
-    private fun updatePlayer(playerId: String, change: (PlayerState) -> PlayerState){
-        val oldMap = _players.value
-        val oldPlayer = oldMap[playerId] ?: return
-
-        val newPlayer = change(oldPlayer)
-
-        val newMap = oldMap.toMutableMap()
-        newMap[playerId] = newPlayer
-        _players.value = newMap.toMap()
-    }
 
     fun isPointInsideObstacle(x: Float, z: Float, obstacle: ObstacleDef, playerRadius: Float): Boolean{
         // Проверка, сталкивается ли точка игрока в сквадратеой стеной препятсвия

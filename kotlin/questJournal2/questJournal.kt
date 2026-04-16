@@ -235,7 +235,6 @@ class GameServer{
         )
     )
 
-    private val _goldByPlayer = MutableStateFlow<>()
 
     val questByPlayer: StateFlow<Map<String, List<QuestStateOnServer>>> = _questByPlayer.asStateFlow()
 

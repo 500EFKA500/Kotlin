@@ -347,6 +347,10 @@ data class MovedBlocked(
     val blockedZ: Int
 ): GameEvent
 
+data class Win(
+    override val playerId: String
+): GameEvent
+
 class GameServer {
 
     // Размер карты, игрок может ходить только в ее пределах
@@ -713,6 +717,7 @@ class GameServer {
                         _events.emit(NpcMemoryChanged(cmd.playerId, newMemory))
                         _events.emit(QuestStateChanged(cmd.playerId, QuestState.GOOD_END))
                         _events.emit(ServerMessage(cmd.playerId, "Алхимик получил траву и выдал тебе золото"))
+                        _events.emit(Win(cmd.playerId))
                     }
 
                     else -> {
@@ -802,6 +807,7 @@ fun eventToText(e: GameEvent): String{
         is InteractedWithChest -> "InteractedWithChest ${e.chestId}"
         is GoldCountChanged -> "GoldCountChanged ${e.newCount}"
         is ServerMessage -> "Server: ${e.text}"
+        is Win -> "Win"
     }
 }
 
@@ -1110,6 +1116,15 @@ fun main() = KoolApplication {
                 }
             }
         }
+        addPanelSurface {
+            modifier
+                .align(AlignmentX.Start, AlignmentY.Top)
+                .margin(16.dp)
+                .background(RoundRectBackground(Color(0f, 0f, 0f, 0.6f), 14.dp))
+                .padding(12.dp)
+
+
+        }
     }
 }
 
@@ -1117,4 +1132,3 @@ fun main() = KoolApplication {
 // 1.2 d)
 // 1.3 d)
 
-    
