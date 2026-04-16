@@ -45,6 +45,9 @@ import javax.management.ValueExp
 import java.io.File
 import javax.imageio.ImageIO
 import javax.imageio.metadata.IIOMetadataNode
+import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.LineEvent
+import kotlin.concurrent.thread
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -759,6 +762,7 @@ class HudState{
 
     val isWinVisible = mutableStateOf(false)
     val winGifProvider = mutableStateOf<ImageProvider?>(null)
+    val hasPlayedWinSound = mutableStateOf(false)
 }
 
 private data class GifFrame(
@@ -838,6 +842,33 @@ private class AnimatedGifImageProvider(
             }
             reader.dispose()
             return result
+        }
+    }
+}
+
+private fun playWinSoundIfExists(hud: HudState) {
+    if (hud.hasPlayedWinSound.value) return
+
+    val soundFile = listOf(
+        File("kotlin/playerGridMovement/victory.mp3")
+    ).firstOrNull { it.exists() } ?: return
+
+    hud.hasPlayedWinSound.value = true
+
+    thread(isDaemon = true, name = "win-sound-player") {
+        runCatching {
+            AudioSystem.getAudioInputStream(soundFile).use { input ->
+                val clip = AudioSystem.getClip()
+                clip.addLineListener { event ->
+                    if (event.type == LineEvent.Type.STOP) {
+                        clip.close()
+                    }
+                }
+                clip.open(input)
+                clip.start()
+            }
+        }.onFailure {
+            hud.hasPlayedWinSound.value = false
         }
     }
 }
@@ -1077,9 +1108,7 @@ fun main() = KoolApplication {
             .filter { it is Win }
             .onEach {
                 hud.isWinVisible.value = true
-                if (hud.winGifProvider.value == null) {
-                    hud.winGifProvider.value = AnimatedGifImageProvider.fromPath("kotlin/playerGridMovement/confetti.gif")
-                }
+                playWinSoundIfExists(hud)
             }
             .launchIn(coroutineScope)
 
@@ -1231,7 +1260,13 @@ fun main() = KoolApplication {
                             .padding(horizontal = 20.dp, vertical = 12.dp)
                     }
 
-                    val provider = hud.winGifProvider.use()
+                    var provider = hud.winGifProvider.use()
+                    if (provider == null) {
+                        provider = AnimatedGifImageProvider.fromPath("kotlin/playerGridMovement/confetti.gif")
+                        if (provider != null) {
+                            hud.winGifProvider.value = provider
+                        }
+                    }
                     if (provider != null) {
                         Image {
                             modifier
@@ -1244,11 +1279,20 @@ fun main() = KoolApplication {
                                 .padding(6.dp)
                         }
                     } else {
-                        Text("Добавь GIF: kotlin/playerGridMovement/confetti.gif") {
+                        Text("GIF не найдена: kotlin/playerGridMovement/confetti.gif") {
                             modifier.margin(top = 8.dp).background(
                                 RoundRectBackground(Color(0f, 0f, 0f, 0.55f), 8.dp)
                             ).padding(horizontal = 10.dp, vertical = 6.dp)
                         }
+                    }
+
+                    val soundExists = 
+                            File("kotlin/playerGridMovement/victory.mp3").exists()
+                    Text(
+                        if (soundExists) "Звук победы найден"
+                        else "Добавь звук: win.wav / win.ogg / victory.mp3"
+                    ) {
+                        modifier.margin(top = 6.dp).font(sizes.smallText)
                     }
                 }
             }
